@@ -17,7 +17,7 @@ Dependencies will be the same as that of masbcpp.
 Run using Jupyter Notebook 'debug_masbcpp.ipynb'. 
 
 ## Limitations
-Slow to comput fine mesh CADs and only .npy files supported for input and ouput.
+Slow to compute fine mesh CADs and only .npy files supported for input and ouput.
 
 ## Acknowledgements
 https://github.com/tudelft3d/masbcpp
