@@ -1,0 +1,6 @@
+/tmp/stuff/masbcpp/CMakeFiles/edit_cache.dir
+/tmp/stuff/masbcpp/CMakeFiles/masbcpp.dir
+/tmp/stuff/masbcpp/CMakeFiles/compute_ma.dir
+/tmp/stuff/masbcpp/CMakeFiles/compute_normals.dir
+/tmp/stuff/masbcpp/CMakeFiles/rebuild_cache.dir
+/tmp/stuff/masbcpp/CMakeFiles/simplify.dir

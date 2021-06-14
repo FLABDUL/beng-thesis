@@ -1,0 +1,110 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Source Files\cnpy">
+      <UniqueIdentifier>{e211ef40-8e4b-456d-aa38-7e98ea59815f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\tclap">
+      <UniqueIdentifier>{f32b3c59-542f-43c6-82e3-bfee088e7f43}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\thirdparty\cnpy\cnpy.h">
+      <Filter>Source Files\cnpy</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\Arg.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\ArgException.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\ArgTraits.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\CmdLine.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\CmdLineInterface.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\CmdLineOutput.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\Constraint.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\DocBookOutput.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\HelpVisitor.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\IgnoreRestVisitor.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\MultiArg.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\MultiSwitchArg.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\OptionalUnlabeledTracker.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\StandardTraits.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\StdOutput.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\SwitchArg.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\UnlabeledMultiArg.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\UnlabeledValueArg.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\ValueArg.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\ValuesConstraint.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\VersionVisitor.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\Visitor.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\XorHandler.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thirdparty\tclap\ZshCompletionOutput.h">
+      <Filter>Source Files\tclap</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\thirdparty\cnpy\cnpy.cpp">
+      <Filter>Source Files\cnpy</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\thirdparty\tclap\COPYING">
+      <Filter>Source Files\tclap</Filter>
+    </None>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,2 @@
+/usr/bin/ar qc libmasbcpp.a  CMakeFiles/masbcpp.dir/src/io.cpp.o CMakeFiles/masbcpp.dir/src/compute_normals_processing.cpp.o CMakeFiles/masbcpp.dir/src/compute_ma_processing.cpp.o CMakeFiles/masbcpp.dir/src/simplify_processing.cpp.o
+/usr/bin/ranlib libmasbcpp.a

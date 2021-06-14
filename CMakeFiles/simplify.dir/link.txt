@@ -1,0 +1,1 @@
+/usr/bin/c++    -std=c++11  -Wno-deprecated -funroll-loops -ffast-math -fopenmp -O3 -DNDEBUG    CMakeFiles/simplify.dir/src/simplify.cpp.o  -o simplify -rdynamic libmasbcpp.a /usr/lib/libpcl_features.so /usr/lib/libpcl_filters.so /usr/lib/libpcl_sample_consensus.so /usr/lib/libpcl_search.so /usr/lib/libpcl_kdtree.so /usr/lib/libpcl_octree.so /usr/lib/libpcl_common.so -lcnpy 
