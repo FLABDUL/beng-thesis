@@ -27,21 +27,23 @@ SOFTWARE.
 
 #include <functional>
 
-struct ma_parameters {//state ip par vars
+struct ma_parameters {
    Scalar initial_radius;
    bool nan_for_initr;
    double denoise_preserve;
    double denoise_planar;
+   Scalar convergence_delta = Scalar(1E-7);
+   unsigned int iteration_limit = 200;
 };
 
-struct ma_result {//state op par vars
+struct ma_result {
    Point c;
    int qidx;
-   float r;
+   Scalar r;
 };
 
-using progress_callback = std::function<void(size_t progress)>;//?
+using progress_callback = std::function<void(size_t progress)>;
 
-void compute_masb_points(ma_parameters &input_parameters, ma_data &madata, progress_callback callback = {});//compute ma function
+void compute_masb_points(ma_parameters &input_parameters, ma_data &madata, progress_callback callback = {});
 
 #endif

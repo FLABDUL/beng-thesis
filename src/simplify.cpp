@@ -30,6 +30,7 @@ SOFTWARE.
 // typedefs
 #include "simplify_processing.h"
 #include "io.h"
+#include "version.h"
 
 
 
@@ -37,10 +38,10 @@ int main(int argc, char **argv)
 {
     // parse command line arguments
     try {
-        TCLAP::CmdLine cmd("Feature-aware pointcloud simplification based on the Medial Axis Transform, see also https://github.com/tudelft3d/masbcpp", ' ', "0.1");
+        TCLAP::CmdLine cmd("Feature-aware point-cloud simplification using the Medial Axis Transform.", ' ', MASBCPP_VERSION);
 
         TCLAP::UnlabeledValueArg<std::string> inputArg( "input", "path to input directory with inside it a 'coords.npy' and 'ma_*.npy' files. Both should be Nx3 float arrays where N is the number of input points.", true, "", "input dir", cmd);
-        TCLAP::UnlabeledValueArg<std::string> outputArg( "ouput", "path to output directory", false, "", "output dir", cmd);
+        TCLAP::UnlabeledValueArg<std::string> outputArg( "output", "path to output directory", false, "", "output dir", cmd);
 
         TCLAP::ValueArg<double> epsilonArg("e","epsilon","Control the degree of simplification, higher values mean more simplification. Typical values are in the range [0.01,0.6].",false,0.4,"double", cmd);
         TCLAP::ValueArg<double> cellsizeArg("c","cellsize","Cellsize used during grid-based lfs simplification (in units of your dataset). Large cellsize means faster processing, but potentially more noticable jumps in point density at cell boundaries.",false,0.5,"double", cmd);
@@ -58,11 +59,12 @@ int main(int argc, char **argv)
 
         cmd.parse(argc,argv);
         
+        constexpr double pi = 3.14159265358979323846;
         simplify_parameters input_parameters;
 
         input_parameters.epsilon = epsilonArg.getValue();
         input_parameters.cellsize = cellsizeArg.getValue();
-        input_parameters.bisec_threshold = (bisecArg.getValue() / 180.0) * M_PI;
+        input_parameters.bisec_threshold = (bisecArg.getValue() / 180.0) * pi;
         input_parameters.bisec_k = biseckArg.getValue();
         
         input_parameters.compute_lfs = !nolfsSwitch.getValue();
@@ -148,7 +150,13 @@ int main(int argc, char **argv)
             
             ofs.close();
         }
-	} catch (TCLAP::ArgException &e) { std::cerr << "Error: " << e.error() << " for " << e.argId() << std::endl; }
+	} catch (const TCLAP::ArgException &e) {
+        std::cerr << "Error: " << e.error() << " for " << e.argId() << std::endl;
+        return 2;
+    } catch (const std::exception &e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
 
     return 0;
 }

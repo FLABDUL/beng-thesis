@@ -22,317 +22,237 @@ SOFTWARE.
 
 #include "io.h"
 
-#include <iostream>
+#include <algorithm>
+#include <filesystem>
 #include <fstream>
+#include <memory>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <cnpy.h>
 
-#include "madata.h"
-#include "types.h"
+namespace {
 
-inline cnpy::NpyArray read_npyarray(std::string input_file_path) {
-   // windows fix
-   std::replace(input_file_path.begin(), input_file_path.end(), '\\', '/');
-   // check if file exists
-   {
-      std::ifstream infile(input_file_path.c_str());
-      if (!infile) {
-         std::cerr << "Invalid file path " << input_file_path << std::endl;
-         exit(1);
-      }
+cnpy::NpyArray read_npy_array(const std::filesystem::path &path) {
+   if (!std::filesystem::is_regular_file(path)) {
+      throw std::runtime_error("Missing NumPy array: " + path.string());
    }
-   //std::cout << "Reading array from " << input_file_path <<std::endl;
-   cnpy::NpyArray npy_array = cnpy::npy_load(input_file_path.c_str());
-   return npy_array;
+   cnpy::NpyArray array = cnpy::npy_load(path.string());
+   if (array.fortran_order) {
+      throw std::runtime_error("Fortran-order arrays are not supported: " + path.string());
+   }
+   return array;
 }
 
-void npy2madata(std::string input_dir_path, ma_data &madata, io_parameters &params) {
+void require_shape(const cnpy::NpyArray &array, size_t rows, size_t columns, const std::string &name) {
+   if (array.shape.size() != 2 || array.shape[0] != rows || array.shape[1] != columns) {
+      throw std::runtime_error(name + " must have shape " + std::to_string(rows) + "x" + std::to_string(columns));
+   }
+}
+
+void require_vector_length(const cnpy::NpyArray &array, size_t length, const std::string &name) {
+   const bool one_dimensional = array.shape.size() == 1 && array.shape[0] == length;
+   const bool column_vector = array.shape.size() == 2 && array.shape[0] == length && array.shape[1] == 1;
+   if (!one_dimensional && !column_vector) {
+      throw std::runtime_error(name + " must contain " + std::to_string(length) + " values");
+   }
+}
+
+Scalar floating_value(const cnpy::NpyArray &array, size_t index, const std::string &name) {
+   if (array.word_size == sizeof(float)) {
+      return static_cast<Scalar>(array.data<float>()[index]);
+   }
+   if (array.word_size == sizeof(double)) {
+      return static_cast<Scalar>(array.data<double>()[index]);
+   }
+   throw std::runtime_error(name + " must use float32 or float64 values");
+}
+
+std::vector<float> flatten_points(const PointCloud &points, size_t offset, size_t count) {
+   std::vector<float> values(count * 3);
+   for (size_t i = 0; i < count; ++i) {
+      const Point &point = points.at(i + offset);
+      values[i * 3] = point.x;
+      values[i * 3 + 1] = point.y;
+      values[i * 3 + 2] = point.z;
+   }
+   return values;
+}
+
+}  // namespace
+
+void npy2madata(const std::string &input_dir_path, ma_data &madata, const io_parameters &params) {
+   const std::filesystem::path input_dir(input_dir_path);
+
    if (params.coords) {
-      //std::cout << "Reading coords array..." << std::endl;
-
-      cnpy::NpyArray npy_array = read_npyarray(input_dir_path + "/coords.npy");//read data loads byte-by-byte
-      //float* coords_carray = npy_array.data<float>();
-      double* coords_carray = npy_array.data<double>();//
-	  
+      cnpy::NpyArray coords = read_npy_array(input_dir / "coords.npy");
+      if (coords.shape.size() != 2 || coords.shape[1] != 3) {
+         throw std::runtime_error("coords.npy must have shape Nx3");
+      }
       madata.coords.reset(new PointCloud);
-      madata.coords->reserve(npy_array.shape[0]);
-
-      //std::cout << "shape 0 = " << npy_array.shape[0] << std::endl;//8 vertices
-      //std::cout << "shape 1 = " << npy_array.shape[1] << std::endl;//3 per
-	  
-      for (size_t i = 0; i < npy_array.shape[0]; i++){
-          //std::cout << "DEBUG: x =  " << std::to_string(coords_carray[i * 3 + 0]) << std::endl << std::flush;
-         //std::cout << "DEBUG: y =  " << std::to_string(coords_carray[i * 3 + 1]) << std::endl << std::flush;
-         //std::cout << "DEBUG: z =  " << std::to_string(coords_carray[i * 3 + 2]) << std::endl << std::flush;
+      madata.coords->reserve(coords.shape[0]);
+      for (size_t i = 0; i < coords.shape[0]; ++i) {
          madata.coords->push_back(Point(
-            (float)coords_carray[i * 3 + 0],
-            (float)coords_carray[i * 3 + 1],
-            (float)coords_carray[i * 3 + 2]
-         ));
-	  }
-      //npy_array.destruct();
+            floating_value(coords, i * 3, "coords.npy"),
+            floating_value(coords, i * 3 + 1, "coords.npy"),
+            floating_value(coords, i * 3 + 2, "coords.npy")));
+      }
    }
 
+   if ((params.normals || params.ma_coords || params.ma_qidx || params.lfs) && !madata.coords) {
+      throw std::runtime_error("Coordinate data must be loaded before dependent arrays");
+   }
+
+   const size_t point_count = madata.coords ? madata.coords->size() : 0;
+
    if (params.normals) {
-      //std::cout << "Reading normals array..." << std::endl;
-
-      cnpy::NpyArray npy_array_norm = read_npyarray(input_dir_path + "/normals.npy");
-      double* normals_carray = npy_array_norm.data<double>();
-
-      if (npy_array_norm.shape[0] != madata.coords->size()) {
-         std::cerr << "Mismatched number of coords and normals" << std::endl;
-         exit(1);
-      }
-
+      cnpy::NpyArray normals = read_npy_array(input_dir / "normals.npy");
+      require_shape(normals, point_count, 3, "normals.npy");
       madata.normals.reset(new NormalCloud);
-      madata.normals->reserve(madata.coords->size());
-
-      for (size_t i = 0; i < madata.coords->size(); i++){
-          //std::cout << "DEBUG: nx =  " << std::to_string(normals_carray[i * 3 + 0]) << std::endl << std::flush;
-         //std::cout << "DEBUG: ny =  " << std::to_string(normals_carray[i * 3 + 1]) << std::endl << std::flush;
-         //std::cout << "DEBUG: nz =  " << std::to_string(normals_carray[i * 3 + 2]) << std::endl << std::flush;
+      madata.normals->reserve(point_count);
+      for (size_t i = 0; i < point_count; ++i) {
          madata.normals->push_back(Normal(
-            (float)normals_carray[i * 3 + 0],
-            (float)normals_carray[i * 3 + 1],
-            (float)normals_carray[i * 3 + 2]
-         ));
-	  }
-      //npy_array.destruct();
+            floating_value(normals, i * 3, "normals.npy"),
+            floating_value(normals, i * 3 + 1, "normals.npy"),
+            floating_value(normals, i * 3 + 2, "normals.npy")));
+      }
    }
 
    if (params.ma_coords) {
-      //std::cout << "Reading ma coords arrays..." << std::endl;
-
-      cnpy::NpyArray in_npy_array = read_npyarray(input_dir_path + "/ma_coords_in.npy");
-      float* in_ma_coords_carray = in_npy_array.data<float>();
-
-      if (in_npy_array.shape[0] != madata.coords->size()) {
-         std::cerr << "Mismatched number of coords and inner ma coords" << std::endl;
-         exit(1);
-      }
-
-      cnpy::NpyArray out_npy_array = read_npyarray(input_dir_path + "/ma_coords_out.npy");
-      float* out_ma_coords_carray = out_npy_array.data<float>();
-
-      if (out_npy_array.shape[0] != madata.coords->size()) {
-         std::cerr << "Mismatched number of coords and outer ma coords" << std::endl;
-         exit(1);
-      }
+      cnpy::NpyArray inner = read_npy_array(input_dir / "ma_coords_in.npy");
+      cnpy::NpyArray outer = read_npy_array(input_dir / "ma_coords_out.npy");
+      require_shape(inner, point_count, 3, "ma_coords_in.npy");
+      require_shape(outer, point_count, 3, "ma_coords_out.npy");
 
       madata.ma_coords.reset(new PointCloud);
-      madata.ma_coords->reserve(2 * madata.coords->size());
-
-      for (size_t i = 0; i < madata.coords->size(); i++){
-         madata.ma_coords->push_back(Point(
-            in_ma_coords_carray[i * 3 + 0],
-            in_ma_coords_carray[i * 3 + 1],
-            in_ma_coords_carray[i * 3 + 2]
-         ));
-	  }
-      //in_npy_array.destruct();
-
-      for (size_t i = 0; i < madata.coords->size(); i++)
-         madata.ma_coords->push_back(Point(
-            out_ma_coords_carray[i * 3 + 0],
-            out_ma_coords_carray[i * 3 + 1],
-            out_ma_coords_carray[i * 3 + 2]
-         ));
-      //out_npy_array.destruct();
+      madata.ma_coords->reserve(2 * point_count);
+      for (const auto *array : {&inner, &outer}) {
+         for (size_t i = 0; i < point_count; ++i) {
+            madata.ma_coords->push_back(Point(
+               floating_value(*array, i * 3, "medial-axis coordinates"),
+               floating_value(*array, i * 3 + 1, "medial-axis coordinates"),
+               floating_value(*array, i * 3 + 2, "medial-axis coordinates")));
+         }
+      }
    }
 
    if (params.ma_qidx) {
-      //std::cout << "Reading q index arrays..." << std::endl;
-
-      cnpy::NpyArray in_npy_array = read_npyarray(input_dir_path + "/ma_qidx_in.npy");
-      int* in_qidx_carray = in_npy_array.data<int>();
-
-      if (in_npy_array.shape[0] != madata.coords->size()) {
-         std::cerr << "Mismatched number of coords and inner q indices" << std::endl;
-         exit(1);
+      cnpy::NpyArray inner = read_npy_array(input_dir / "ma_qidx_in.npy");
+      cnpy::NpyArray outer = read_npy_array(input_dir / "ma_qidx_out.npy");
+      require_vector_length(inner, point_count, "ma_qidx_in.npy");
+      require_vector_length(outer, point_count, "ma_qidx_out.npy");
+      if (inner.word_size != sizeof(int) || outer.word_size != sizeof(int)) {
+         throw std::runtime_error("Medial-axis index arrays must use 32-bit integers");
       }
-
-      cnpy::NpyArray out_npy_array = read_npyarray(input_dir_path + "/ma_qidx_out.npy");
-      int* out_qidx_carray = out_npy_array.data<int>();
-
-      if (out_npy_array.shape[0] != madata.coords->size()) {
-         std::cerr << "Mismatched number of coords and outer q indices" << std::endl;
-         exit(1);
-      }
-
-      madata.ma_qidx.reserve(2 * madata.coords->size());
-
-      for (size_t i = 0; i < madata.coords->size(); i++)
-         madata.ma_qidx.push_back(in_qidx_carray[i]);
-      //in_npy_array.destruct();
-
-      for (size_t i = 0; i < madata.coords->size(); i++)
-         madata.ma_qidx.push_back(out_qidx_carray[i]);
-      //out_npy_array.destruct();
+      madata.ma_qidx.reserve(2 * point_count);
+      madata.ma_qidx.insert(madata.ma_qidx.end(), inner.data<int>(), inner.data<int>() + point_count);
+      madata.ma_qidx.insert(madata.ma_qidx.end(), outer.data<int>(), outer.data<int>() + point_count);
    }
 
    if (params.lfs) {
-      //std::cout << "Reading lfs array..." << std::endl;
-
-      cnpy::NpyArray npy_array = read_npyarray(input_dir_path + "/lfs.npy");
-      float* lfs_carray = npy_array.data<float>();
-
-      if (npy_array.shape[0] != madata.coords->size()) {
-         std::cerr << "Mismatched number of coords and lfs" << std::endl;
-         exit(1);
+      cnpy::NpyArray lfs = read_npy_array(input_dir / "lfs.npy");
+      require_vector_length(lfs, point_count, "lfs.npy");
+      madata.lfs.reserve(point_count);
+      for (size_t i = 0; i < point_count; ++i) {
+         madata.lfs.push_back(floating_value(lfs, i, "lfs.npy"));
       }
-
-      madata.lfs.reserve(madata.coords->size());
-
-      for (size_t i = 0; i < madata.coords->size(); i++)
-         madata.lfs.push_back(lfs_carray[i]);
-      //npy_array.destruct();
    }
 }
 
-void madata2npy(std::string npy_path, ma_data &madata, io_parameters &params) {
-   if (params.coords) {
-      //std::cout << "Writing coords array..." << std::endl;
+void madata2npy(const std::string &npy_path, const ma_data &madata, const io_parameters &params) {
+   const std::filesystem::path output_dir(npy_path);
+   std::filesystem::create_directories(output_dir);
+   const size_t point_count = madata.coords ? madata.coords->size() : 0;
+   if (point_count == 0) {
+      throw std::runtime_error("Cannot write output for an empty point cloud");
+   }
 
-      //std::cout << "coords size = ." << madata.coords->size() << std::endl;
-	  
-      //const unsigned int shape[] = { static_cast<unsigned int>(madata.coords->size()), 3 };
-	  const std::vector<size_t> shape{ static_cast<size_t>(madata.coords->size()), 3 };
-      float* coords_carray = new float[madata.coords->size() * 3];
-      for (size_t i = 0; i < madata.coords->size(); i++) {
-         coords_carray[i * 3 + 0] = madata.coords->at(i).x;
-         coords_carray[i * 3 + 1] = madata.coords->at(i).y;
-         coords_carray[i * 3 + 2] = madata.coords->at(i).z;
-      }
-      //cnpy::npy_save(npy_path + "/coords.npy", coords_carray, shape, 2, "w");
-	  cnpy::npy_save(npy_path + "/coords.npy", coords_carray, shape);
-      delete[] coords_carray; coords_carray = nullptr;
+   const std::vector<size_t> point_shape{point_count, 3};
+   const std::vector<size_t> vector_shape{point_count};
+
+   if (params.coords) {
+      std::vector<float> values = flatten_points(*madata.coords, 0, point_count);
+      cnpy::npy_save((output_dir / "coords.npy").string(), values.data(), point_shape, "w");
    }
 
    if (params.normals) {
-      //std::cout << "Writing normals array..." << std::endl;
-
-      //const unsigned int shape[] = { static_cast<unsigned int>(madata.coords->size()), 3 };
-      const std::vector<size_t> shape{ static_cast<size_t>(madata.coords->size()), 3 };
-      float* normals_carray = new float[madata.coords->size() * 3];
-      for (size_t i = 0; i < madata.coords->size(); i++) {
-         normals_carray[i * 3 + 0] = madata.normals->at(i).normal_x;
-         normals_carray[i * 3 + 1] = madata.normals->at(i).normal_y;
-         normals_carray[i * 3 + 2] = madata.normals->at(i).normal_z;
+      if (!madata.normals || madata.normals->size() != point_count) {
+         throw std::runtime_error("Normals are missing or do not match the point count");
       }
-      //cnpy::npy_save(npy_path + "/normals.npy", normals_carray, shape, 2, "w");
-	  cnpy::npy_save(npy_path + "/normals.npy", normals_carray, shape);
-      delete[] normals_carray; normals_carray = nullptr;
+      std::vector<float> values(point_count * 3);
+      for (size_t i = 0; i < point_count; ++i) {
+         const Normal &normal = madata.normals->at(i);
+         values[i * 3] = normal.normal_x;
+         values[i * 3 + 1] = normal.normal_y;
+         values[i * 3 + 2] = normal.normal_z;
+      }
+      cnpy::npy_save((output_dir / "normals.npy").string(), values.data(), point_shape, "w");
    }
 
    if (params.ma_coords) {
-      //std::cout << "Writing ma coords arrays..." << std::endl;
-
-      //const unsigned int shape[] = { static_cast<unsigned int>(madata.coords->size()), 3 };
-      const std::vector<size_t> shape{ static_cast<size_t>(madata.coords->size()), 3 };
-
-      float* in_ma_coords_carray = new float[madata.coords->size() * 3];
-      for (size_t i = 0; i < madata.coords->size(); i++) {
-         in_ma_coords_carray[i * 3 + 0] = madata.ma_coords->at(i).x;
-         in_ma_coords_carray[i * 3 + 1] = madata.ma_coords->at(i).y;
-         in_ma_coords_carray[i * 3 + 2] = madata.ma_coords->at(i).z;
+      if (!madata.ma_coords || madata.ma_coords->size() != 2 * point_count) {
+         throw std::runtime_error("Medial-axis coordinates are missing or incomplete");
       }
-      //cnpy::npy_save(npy_path + "/ma_coords_in.npy", in_ma_coords_carray, shape, 2, "w");
-	  cnpy::npy_save(npy_path + "/ma_coords_in.npy", in_ma_coords_carray, shape);
-      delete[] in_ma_coords_carray; in_ma_coords_carray = nullptr;
-
-      float* out_ma_coords_carray = new float[madata.coords->size() * 3];
-      for (size_t i = 0; i < madata.coords->size(); i++) {
-         out_ma_coords_carray[i * 3 + 0] = madata.ma_coords->at(i + madata.coords->size()).x;
-         out_ma_coords_carray[i * 3 + 1] = madata.ma_coords->at(i + madata.coords->size()).y;
-         out_ma_coords_carray[i * 3 + 2] = madata.ma_coords->at(i + madata.coords->size()).z;
-      }
-      //cnpy::npy_save(npy_path + "/ma_coords_out.npy", out_ma_coords_carray, shape, 2, "w");
-	  cnpy::npy_save(npy_path + "/ma_coords_out.npy", out_ma_coords_carray, shape);
-      delete[] out_ma_coords_carray; out_ma_coords_carray = nullptr;
+      std::vector<float> inner = flatten_points(*madata.ma_coords, 0, point_count);
+      std::vector<float> outer = flatten_points(*madata.ma_coords, point_count, point_count);
+      cnpy::npy_save((output_dir / "ma_coords_in.npy").string(), inner.data(), point_shape, "w");
+      cnpy::npy_save((output_dir / "ma_coords_out.npy").string(), outer.data(), point_shape, "w");
    }
 
    if (params.ma_qidx) {
-      //std::cout << "Writing q index arrays..." << std::endl;
-
-      //const unsigned int shape[] = { static_cast<unsigned int>(madata.coords->size()) };
-      const std::vector<size_t> shape{ static_cast<size_t>(madata.coords->size()), 1 };
-
-      //cnpy::npy_save(npy_path + "/ma_qidx_in.npy", &madata.ma_qidx[0], shape, 1, "w");
-	  cnpy::npy_save(npy_path + "/ma_qidx_in.npy", &madata.ma_qidx[0], shape, "w");
-      //cnpy::npy_save(npy_path + "/ma_qidx_out.npy", &madata.ma_qidx[madata.coords->size()], shape, 1, "w");
-	  cnpy::npy_save(npy_path + "/ma_qidx_out.npy", &madata.ma_qidx[madata.coords->size()], shape);
+      if (madata.ma_qidx.size() != 2 * point_count) {
+         throw std::runtime_error("Medial-axis indices are missing or incomplete");
+      }
+      cnpy::npy_save((output_dir / "ma_qidx_in.npy").string(), madata.ma_qidx.data(), vector_shape, "w");
+      cnpy::npy_save((output_dir / "ma_qidx_out.npy").string(), madata.ma_qidx.data() + point_count, vector_shape, "w");
    }
-   
-      if (params.ma_rs) {
-      //std::cout << "Writing radius arrays..." << std::endl;
 
-      const std::vector<size_t> shape{ static_cast<size_t>(madata.coords->size()) };
-
-      //cnpy::npy_save(npy_path + "/ma_qidx_in.npy", &madata.ma_qidx[0], shape, 1, "w");
-	  cnpy::npy_save(npy_path + "/ma_rad_in.npy", &madata.ma_rs[0], shape, "w");
-      //cnpy::npy_save(npy_path + "/ma_qidx_out.npy", &madata.ma_qidx[madata.coords->size()], shape, 1, "w");
-	  cnpy::npy_save(npy_path + "/ma_rad_out.npy", &madata.ma_rs[madata.coords->size()], shape);
+   if (params.ma_rs) {
+      if (madata.ma_rs.size() != 2 * point_count) {
+         throw std::runtime_error("Medial-ball radii are missing or incomplete");
+      }
+      cnpy::npy_save((output_dir / "ma_rad_in.npy").string(), madata.ma_rs.data(), vector_shape, "w");
+      cnpy::npy_save((output_dir / "ma_rad_out.npy").string(), madata.ma_rs.data() + point_count, vector_shape, "w");
    }
 
    if (params.lfs) {
-      //std::cout << "Writing lfs array..." << std::endl;
-
-      //const unsigned int shape[] = { static_cast<unsigned int>(madata.coords->size()) };
-	  const std::vector<size_t> shape{ static_cast<size_t>(madata.coords->size()) };
-      //cnpy::npy_save(npy_path + "/lfs.npy", &madata.lfs[0], shape, 1, "w");
-	  cnpy::npy_save(npy_path + "/lfs.npy", &madata.lfs[0], shape);
+      if (madata.lfs.size() != point_count) {
+         throw std::runtime_error("Local feature-size values are missing or incomplete");
+      }
+      cnpy::npy_save((output_dir / "lfs.npy").string(), madata.lfs.data(), vector_shape, "w");
    }
 
    if (params.mask) {
-      //std::cout << "Writing mask array..." << std::endl;
-
-	  const std::vector<size_t> shape{ static_cast<size_t>(madata.coords->size()) };
-	  //const unsigned int shape[] = { static_cast<unsigned int>(madata.coords->size()) };
-      bool* out_mask_carray = new bool[madata.coords->size()];
-      for (size_t i = 0; i < madata.coords->size(); i++) {
-         out_mask_carray[i] = madata.mask[i];
+      if (madata.mask.size() != point_count) {
+         throw std::runtime_error("Simplification mask is missing or incomplete");
       }
-      //cnpy::npy_save(npy_path + "/decimate_lfs.npy", out_mask_carray, shape, 1, "w");
-	  cnpy::npy_save(npy_path + "/decimate_lfs.npy", out_mask_carray, shape);
-      delete[] out_mask_carray; out_mask_carray = nullptr;
+      std::unique_ptr<bool[]> mask(new bool[point_count]);
+      for (size_t i = 0; i < point_count; ++i) {
+         mask[i] = madata.mask[i];
+      }
+      cnpy::npy_save((output_dir / "decimate_lfs.npy").string(), mask.get(), vector_shape, "w");
    }
 }
 
-// Just a convenience function, to call when necessary.
-void convertNPYtoXYZ(std::string input_dir_path)
-{
-   // Read in the data:
-   cnpy::NpyArray coords_npy = read_npyarray(input_dir_path + "/coords.npy");
-   float* coords_carray = coords_npy.data<float>();
-
-   unsigned int num_points = coords_npy.shape[0];
-   unsigned int dim = coords_npy.shape[1];
-
-   // Write this out to a pointcloudxyz file:
-   std::string outFile(input_dir_path + "/coords.xyz");
-   std::ofstream out_pointcloudxyz(outFile);
-   if (!out_pointcloudxyz)
-   {
-      std::cerr << "Invalid file path " << outFile << std::endl;
-      exit(1);
+void convertNPYtoXYZ(const std::string &input_dir_path) {
+   const std::filesystem::path input_dir(input_dir_path);
+   cnpy::NpyArray coords = read_npy_array(input_dir / "coords.npy");
+   if (coords.shape.size() != 2 || coords.shape[1] != 3) {
+      throw std::runtime_error("coords.npy must have shape Nx3");
    }
 
-   // Header
-   out_pointcloudxyz << "x y z\n";
-
-   // coords
-   for (int i = 0; i < num_points; i++)
-   {
-      for (int j = 0; j < 3; j++)
-      {
-         if (j > 0) out_pointcloudxyz << " ";
-         out_pointcloudxyz << coords_carray[i * 3 + j];
-         //std::cout << "DEBUG: i =  " << std::to_string(i) << std::endl << std::flush;
-         //std::cout << "DEBUG: j =  " << std::to_string(j) << std::endl << std::flush;
-         //std::cout << "DEBUG: coords =  " << std::to_string(coords_carray[i * 3 + j]) << std::endl << std::flush;
-      }
-      out_pointcloudxyz << "\n";
+   const std::filesystem::path output_path = input_dir / "coords.xyz";
+   std::ofstream output(output_path);
+   if (!output) {
+      throw std::runtime_error("Could not write " + output_path.string());
    }
-   //coords_npy.destruct();
+
+   output << "x y z\n";
+   for (size_t i = 0; i < coords.shape[0]; ++i) {
+      output
+         << floating_value(coords, i * 3, "coords.npy") << ' '
+         << floating_value(coords, i * 3 + 1, "coords.npy") << ' '
+         << floating_value(coords, i * 3 + 2, "coords.npy") << '\n';
+   }
 }

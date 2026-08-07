@@ -23,8 +23,6 @@ SOFTWARE.
 #ifndef MASBCPP_IO_
 #define MASBCPP_IO_
 
-#include <iostream>
-#include <fstream>
 #include <string>
 
 #include "madata.h"
@@ -37,14 +35,10 @@ struct io_parameters {
    bool ma_rs;
    bool lfs;
    bool mask;
-
-   bool c_p;//HAKIM FINDING C-P
 };
 
-void npy2madata(std::string input_dir_path, ma_data &madata, io_parameters &p);
-void madata2npy(std::string npy_path, ma_data &madata, io_parameters &p);
-
-// Just a convenience function, to call when necessary.
-void convertNPYtoXYZ(std::string input_dir_path);
+void npy2madata(const std::string &input_dir_path, ma_data &madata, const io_parameters &params);
+void madata2npy(const std::string &npy_path, const ma_data &madata, const io_parameters &params);
+void convertNPYtoXYZ(const std::string &input_dir_path);
 
 #endif

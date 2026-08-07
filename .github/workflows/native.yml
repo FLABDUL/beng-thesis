@@ -1,0 +1,26 @@
+name: Native C++
+
+on:
+  push:
+    paths-ignore:
+      - "demo/**"
+  pull_request:
+    paths-ignore:
+      - "demo/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install --yes ninja-build libeigen3-dev libpcl-dev zlib1g-dev
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Smoke tests
+        run: ctest --test-dir build --output-on-failure

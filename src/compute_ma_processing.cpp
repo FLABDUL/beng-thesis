@@ -22,235 +22,149 @@ SOFTWARE.
 
 #include "compute_ma_processing.h"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <limits>
 
 #ifdef VERBOSEPRINT
 #include <chrono>
 #include <iostream>
+using Clock = std::chrono::high_resolution_clock;
 #endif
+
+namespace {
+
+const Point nan_point(
+   std::numeric_limits<Scalar>::quiet_NaN(),
+   std::numeric_limits<Scalar>::quiet_NaN(),
+   std::numeric_limits<Scalar>::quiet_NaN());
+
+Scalar compute_radius(const Vector3 &p, const Vector3 &n, const Vector3 &q) {
+   const Scalar distance = (p - q).norm();
+   if (distance <= std::numeric_limits<Scalar>::epsilon()) {
+      return std::numeric_limits<Scalar>::quiet_NaN();
+   }
+
+   const Scalar cos_theta = n.dot(p - q) / distance;
+   if (std::abs(cos_theta) <= std::numeric_limits<Scalar>::epsilon()) {
+      return std::numeric_limits<Scalar>::quiet_NaN();
+   }
+
+   return distance / (Scalar(2) * cos_theta);
+}
+
+Scalar cos_angle(const Vector3 &lhs, const Vector3 &rhs) {
+   const Scalar denominator = lhs.norm() * rhs.norm();
+   if (denominator <= std::numeric_limits<Scalar>::epsilon()) {
+      return Scalar(1);
+   }
+   return std::clamp(lhs.dot(rhs) / denominator, Scalar(-1), Scalar(1));
+}
+
+ma_result shrinking_ball_point(
+   const ma_parameters &parameters,
+   const Vector3 &p,
+   const Vector3 &n,
+   const pcl::search::KdTree<Point>::Ptr &kd_tree) {
+   Scalar radius = parameters.initial_radius;
+   Point center;
+   center.getVector3fMap() = p - n * radius;
+
+   if (!center.getVector3fMap().allFinite()) {
+      return {nan_point, -1, std::numeric_limits<Scalar>::quiet_NaN()};
+   }
+
+   int q_index = -1;
+   unsigned int iteration = 0;
+   std::vector<int> nearest_indices(1);
+   std::vector<Scalar> nearest_distances(1);
+
+   while (iteration < parameters.iteration_limit) {
+      if (kd_tree->nearestKSearch(center, 1, nearest_indices, nearest_distances) <= 0) {
+         break;
+      }
+
+      const int next_q_index = nearest_indices.front();
+      const Vector3 q = kd_tree->getInputCloud()->at(next_q_index).getVector3fMap();
+      const Scalar convergence_radius = std::max(Scalar(0), radius - parameters.convergence_delta);
+
+      // PCL returns squared distances. A ball has converged when its nearest
+      // surface point lies on (or outside) the current radius.
+      if (p == q || nearest_distances.front() >= convergence_radius * convergence_radius) {
+         break;
+      }
+
+      const Scalar next_radius = compute_radius(p, n, q);
+      if (!std::isfinite(next_radius) || next_radius <= Scalar(0) || next_radius >= radius) {
+         break;
+      }
+
+      const Vector3 next_center = p - n * next_radius;
+      if (!next_center.allFinite()) {
+         break;
+      }
+
+      if (parameters.denoise_preserve > 0 || parameters.denoise_planar > 0) {
+         const Scalar separation_angle = std::acos(cos_angle(p - next_center, q - next_center));
+         if (iteration == 0 && parameters.denoise_planar > 0 &&
+             separation_angle < parameters.denoise_planar) {
+            break;
+         }
+         if (iteration > 0 && parameters.denoise_preserve > 0 &&
+             separation_angle < parameters.denoise_preserve && next_radius > (q - p).norm()) {
+            break;
+         }
+      }
+
+      center.getVector3fMap() = next_center;
+      radius = next_radius;
+      q_index = next_q_index;
+      ++iteration;
+   }
+
+   if (iteration == 0 && parameters.nan_for_initr) {
+      return {nan_point, -1, std::numeric_limits<Scalar>::quiet_NaN()};
+   }
+
+   // Derive the reported radius from the final centre so both outputs always
+   // describe the same medial ball.
+   const Scalar final_radius = (p - center.getVector3fMap()).norm();
+   return {center, q_index, final_radius};
+}
+
+void shrinking_ball_points(
+   ma_parameters &parameters,
+   ma_data &madata,
+   bool inner,
+   const progress_callback &callback) {
+   const size_t count = madata.coords->size();
+   const size_t offset = inner ? 0 : count;
 
 #ifdef WITH_OPENMP
-#include <omp.h>
+#pragma omp parallel for
 #endif
+   for (std::int64_t i = 0; i < static_cast<std::int64_t>(count); ++i) {
+      const Vector3 p = (*madata.coords)[static_cast<size_t>(i)].getVector3fMap();
+      const Vector3 n = inner
+         ? (*madata.normals)[static_cast<size_t>(i)].getNormalVector3fMap()
+         : -(*madata.normals)[static_cast<size_t>(i)].getNormalVector3fMap();
 
-#ifdef VERBOSEPRINT
-typedef std::chrono::high_resolution_clock Clock;//clock for computation time measurement
-#endif
-
-//==============================
-//   COMPUTE MA
-//==============================
-
-const Scalar delta_convergance = 1E-7f;
-const unsigned int iteration_limit = 200;
-const Point nanPoint(std::numeric_limits<Scalar>::quiet_NaN(), std::numeric_limits<Scalar>::quiet_NaN(), std::numeric_limits<Scalar>::quiet_NaN());
-
-inline Scalar compute_radius(const Vector3 &p, const Vector3 &n, const Vector3 &q) {
-   // compute radius of the ball that touches points p and q and whose center falls on the normal n from p
-   //std::cout << "DEBUG: Compute radius. " << std::endl; 
-   Scalar d = (p - q).norm();
-   //std::cout << "DEBUG: Compute radius.  d=" << d << std::endl;
-   Scalar cos_theta = n.dot(p - q) / d;
-   //std::cout << "DEBUG: Compute radius.  cos_theta=" << cos_theta << std::endl;
-   return Scalar(d / (2 * cos_theta));
-}
-
-inline Scalar cos_angle(const Vector3 p, const Vector3 q) {//check for threshold for ball at point
-   // calculate the cosine of angle between vector p and q, see http://en.wikipedia.org/wiki/Law_of_cosines#Vector_formulation
-   //std::cout << "DEBUG: Find cos angle. " << std::endl;
-   Scalar result = p.dot(q) / (p.norm() * q.norm());
-
-   if (result > 1) 
-   {
-	   //std::cout << "DEBUG: Cos angle results > 1. " << std::endl;
-	  return 1;//positive angle
-   }
-   else if (result < -1)
-   {
-	   //std::cout << "DEBUG: Cos angle results < -1. " << std::endl; 
-	   return -1;//negative angle
-   }
-   return result;//result is scalar cos angle
-}
-
-ma_result sb_point(const ma_parameters &input_parameters, const Vector3 &p, const Vector3 &n, pcl::search::KdTree<Point>::Ptr kd_tree) {
-   // calculate a medial ball for a given oriented point using the shrinking ball algorithm,
-   // see https://3d.bk.tudelft.nl/rypeters/pdfs/16candg.pdf section 3.2 for details
-   unsigned int j = 0;//j is the iteration counter equivalent to i in the paper
-   Scalar r = input_parameters.initial_radius, d;
-   Vector3 q, last_q, c_next;//point index and next centre
-   int qidx = -1, qidx_next;
-   Point c; c.getVector3fMap() = p - n * r;// c, paper co = -r0np + p, is center of ball
-
-   // we can't continue if we have bad input, we won't be able to perform nearest neighbour searches
-   if (!c.getVector3fMap().allFinite())//check input is finite
-   {
-	   //std::cout << "DEBUG: Bad input. " << std::endl;
-   
-      return{ nanPoint, -1 };
-   }
-   // Results from our search
-   std::vector<int> k_indices(1);//indexes
-   std::vector<Scalar> k_distances(1);//distances between points
-
-   //std::cout << "============================================================================ " << std::endl << std::flush;
-
-   while (true) {
-      // find closest point to c
-	  //std::cout << "DEBUG: Finding closest point to centre. " << std::endl << std::flush;
-      kd_tree->nearestKSearch(c, 1, k_indices, k_distances);//does a k search
-      qidx_next = k_indices[0];//start the index at the first k search index
-      q = kd_tree->getInputCloud()->at(qidx_next).getVector3fMap();//get point cloud points from k search
-      d = k_distances[0];//get distances from k search
-
-      // this should handle all (special) cases where we want to break the loop
-      // - normal case when ball no longer shrinks
-      // - the case where q==p, equivalent to pi+1 = pi or p in paper, implying that Bi is empty, cleaarly touches 2 points, and medial ball found, Ci is medial axis point
-      // - any duplicate point cases
-	  float rdel2 = (r-delta_convergance)*(r-delta_convergance);//convergence threshold check
-
-	  //std::cout << "DEBUG: r = " << std::to_string(r) << std::endl << std::flush;
-	  //std::cout << "DEBUG: (r-del)^2 = " << std::to_string(rdel2) << std::endl << std::flush;
-	  //std::cout << "DEBUG: d =  " << std::to_string(d) << std::endl << std::flush;
-	  //std::cout << "DEBUG: n[0] =  " << std::to_string(n[0]) << std::endl << std::flush;
-	  //std::cout << "DEBUG: n[1] =  " << std::to_string(n[1]) << std::endl << std::flush;
-	  //std::cout << "DEBUG: n[2] =  " << std::to_string(n[2]) << std::endl << std::flush;
-	  //std::cout << "DEBUG: p[0] =  " << std::to_string(p[0]) << std::endl << std::flush;
-	  //std::cout << "DEBUG: p[1] =  " << std::to_string(p[1]) << std::endl << std::flush;
-	  //std::cout << "DEBUG: p[2] =  " << std::to_string(p[2]) << std::endl << std::flush;
-	  //std::cout << "DEBUG: q[0] =  " << std::to_string(q[0]) << std::endl << std::flush;
-	  //std::cout << "DEBUG: q[1] =  " << std::to_string(q[1]) << std::endl << std::flush;
-	  //std::cout << "DEBUG: q[2] =  " << std::to_string(q[2]) << std::endl << std::flush;
-		  
-      if (p==q)//check threshold and break accordingly
-	  {
-		  //std::cout << "BREAK: p==q" << std::endl << std::flush;//r too small, always drop out
-		  if (j == 0)
-			  r = -1.0;
-		  else
-			  //r = compute_radius(p, n, last_q);//find next radius
-			  r = 0.5*(p - q).norm();
-		  //std::cout << "DEBUG: compute_rad = " << r << std::endl << std::flush;
-		  break;
-	  }
-	  	  
-	  if (d >= (r-delta_convergance)*(r-delta_convergance))//check threshold and break accordingly
-	  {
-		  //std::cout << "BREAK: d converged" << std::endl << std::flush;//distance is same as r put in
-		  if (j == 0)//if d bigger than r, shrinking closer to start point
-			//r = compute_radius(p, n, q);
-			  r = 0.5 * (p - q).norm();
-		  else
-			  //r = compute_radius(p, n, last_q);//find next radius
-			  r = 0.5 * (p - last_q).norm();
-		  //std::cout << "DEBUG: compute_rad = " << r << std::endl << std::flush;
-		  break;
-	  }
-	  // Compute next ball center
-      r = compute_radius(p, n, q);//find next radius
-	  //std::cout << "DEBUG: compute_rad = " << r << std::endl << std::flush;
-      c_next = p - n * r;//find next centre
-
-      if (!c_next.allFinite())//check if next centre finite
-	  { 
-		  //std::cout << "BREAK: Next centre infinite. " << std::endl;
-		break;
-	  }
-      // denoising
-	  //see https://3d.bk.tudelft.nl/rypeters/pdfs/16candg.pdf section 3.3 for details
-      if (input_parameters.denoise_preserve || input_parameters.denoise_planar) 
-	  {//create denoising thresholds
-         Scalar a = cos_angle(p - c_next, q - c_next);
-         Scalar separation_angle = std::acos(a);//scale invariant separation angle
-		 //std::cout << " denoising. " << std::endl;
-         if (j == 0 && input_parameters.denoise_planar > 0 && separation_angle < input_parameters.denoise_planar)//plane detection for slightly perturbed points
-		 {
-			 //std::cout << "BREAK: Denoise planar. " << std::endl;
-		    break;
-         }
-         if (j > 0 && input_parameters.denoise_preserve > 0 && (separation_angle < input_parameters.denoise_preserve && r > (q - p).norm()))//stable ball preservation to ignore noisy points
-		 {
-			 //std::cout << "BREAK: Denoise preserve check. " << std::endl;
-		    break;
-         }//break according to thresholds dpn and dps
-      }
-      // Stop iteration if this looks like an infinite loop
-      if (j > iteration_limit)//iteration limit set above
-	  {
-		  //std::cout << "BREAK: Passed iteration limit. " << std::endl;
-		 break;
-	  }
-      c.getVector3fMap() = c_next;//go to next centre
-      qidx = qidx_next;//go to next index
-      j++;//start next counter and point, i+1
-	  last_q = q;//take the last index instead of the current one
+      const ma_result result = shrinking_ball_point(parameters, p, n, madata.kd_tree);
+      const size_t output_index = static_cast<size_t>(i) + offset;
+      (*madata.ma_coords)[output_index] = result.c;
+      madata.ma_qidx[output_index] = result.qidx;
+      madata.ma_rs[output_index] = result.r;
    }
 
-   if (j == 0 && input_parameters.nan_for_initr)//if initial point is nan
-   {	 
-	   //std::cout << "DEBUG: Initial point nan. " << std::endl;
-     return{ nanPoint, -1, -1.0 };//return nan and -1
-   }
-   else//if initial point is not nan
-   {
-      //std::cout << "DEBUG: Not initial point nan. r= " << std::to_string(r) << std::endl;
-      return{ c, qidx, r };//return the centre point and index
+   if (callback) {
+      callback(offset + count);
    }
 }
 
-void sb_points(ma_parameters &input_parameters, ma_data &madata, bool inner, progress_callback callback) {
-   // outer mat should be written to second half of ma_coords/ma_qidx
-   size_t offset = 0;
-   if (inner == false)
-      offset = madata.coords->size();
+}  // namespace
 
-   size_t progress = offset;
-   size_t accum = 0;
-//#pragma omp parallel for firstprivate(accum)
-   for (int i = 0; i < madata.coords->size(); i++)
-   {
-      Vector3 p = (*madata.coords)[i].getVector3fMap();
-      Vector3 n;
-      if (inner)
-	  {
-		  //std::cout << "DEBUG: inner " << std::endl << std::flush;
-         n = (*madata.normals)[i].getNormalVector3fMap();
-	  }
-      else
-	  {
-		  //std::cout << "DEBUG: outer " << std::endl << std::flush; 
-         n = -(*madata.normals)[i].getNormalVector3fMap();
-	  }
-
-	  //std::cout << "*****************************" << std::endl << std::flush;
-	  //std::cout << "DEBUG: n[0] =  " << std::to_string(n[0]) << std::endl << std::flush;
-	  //std::cout << "DEBUG: n[1] =  " << std::to_string(n[1]) << std::endl << std::flush;
-	  //std::cout << "DEBUG: n[2] =  " << std::to_string(n[2]) << std::endl << std::flush;
-	  //std::cout << "DEBUG: p[0] =  " << std::to_string(p[0]) << std::endl << std::flush;
-	  //std::cout << "DEBUG: p[1] =  " << std::to_string(p[1]) << std::endl << std::flush;
-	  //std::cout << "DEBUG: p[2] =  " << std::to_string(p[2]) << std::endl << std::flush;
-	  
-      ma_result res = sb_point(input_parameters, p, n, madata.kd_tree);
-
-      (*madata.ma_coords)[i + offset] = res.c;
-      madata.ma_qidx[i + offset] = res.qidx;
-	  madata.ma_rs[i + offset] = res.r;	  
-
-      accum++;
-      if (accum == 5000)
-      {
-//#pragma omp critical
-         {
-            progress += accum;
-            if (callback)
-               callback(progress);
-         }
-         accum = 0;
-      }
-   }
-}
-
-void compute_masb_points(ma_parameters &input_parameters, ma_data &madata, progress_callback callback) {
+void compute_masb_points(ma_parameters &parameters, ma_data &madata, progress_callback callback) {
 #ifdef VERBOSEPRINT
    auto start_time = Clock::now();
 #endif
@@ -259,25 +173,22 @@ void compute_masb_points(ma_parameters &input_parameters, ma_data &madata, progr
       madata.kd_tree.reset(new pcl::search::KdTree<Point>());
       madata.kd_tree->setInputCloud(madata.coords);
 #ifdef VERBOSEPRINT
-      auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start_time);//measure duration
-      std::cout << "Constructed kd-tree in " << elapsed_time.count() << " ms" << std::endl;//output time taken for kd-tree construction
+      auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start_time);
+      std::cout << "Constructed kd-tree in " << elapsed.count() << " ms\n";
       start_time = Clock::now();
 #endif
    }
 
-   // Inside processing
-   sb_points(input_parameters, madata, 1, callback);
+   shrinking_ball_points(parameters, madata, true, callback);
 #ifdef VERBOSEPRINT
-   auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start_time);//measure duration
-   std::cout << "Done shrinking interior balls, took " << elapsed_time.count() << " ms" << std::endl;//print time for interior ball
+   auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start_time);
+   std::cout << "Shrank interior balls in " << elapsed.count() << " ms\n";
    start_time = Clock::now();
 #endif
 
-   // Outside processing
-   sb_points(input_parameters, madata, 0, callback);
+   shrinking_ball_points(parameters, madata, false, callback);
 #ifdef VERBOSEPRINT
-   elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start_time);//measure duration
-   std::cout << "Done shrinking exterior balls, took " << elapsed_time.count() << " ms" << std::endl;//time for exterior ball
+   elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start_time);
+   std::cout << "Shrank exterior balls in " << elapsed.count() << " ms\n";
 #endif
 }
-

@@ -32,13 +32,9 @@ struct ma_data {
    NormalCloud::Ptr normals;
    PointCloud::Ptr ma_coords;
    std::vector<int> ma_qidx;
-   std::vector<float> ma_rs;
-
-   std::vector<float> c_p;//HAKIM FINDING C-P
-
+   std::vector<Scalar> ma_rs;
    std::vector<float> lfs;
    std::vector<bool> mask;
-
    pcl::search::KdTree<Point>::Ptr kd_tree;
 };
 

@@ -30,11 +30,12 @@ SOFTWARE.
 #include "io.h"
 #include "madata.h"
 #include "types.h"
+#include "version.h"
 
 int main(int argc, char **argv) {
    // parse command line arguments
    try {
-      TCLAP::CmdLine cmd("Estimates normals using PCA, see also https://github.com/tudelft3d/masbcpp", ' ', "0.1");
+      TCLAP::CmdLine cmd("Estimate point-cloud normals using PCA.", ' ', MASBCPP_VERSION);
 
       TCLAP::UnlabeledValueArg<std::string> inputArg("input", "path to directory with inside it a 'coords.npy' file; a Nx3 float array where N is the number of input points.", true, "", "input dir", cmd);
       TCLAP::UnlabeledValueArg<std::string> outputArg("output", "path to output directory. Estimated normals are written to the file 'normals.npy'.", false, "", "output dir", cmd);
@@ -69,7 +70,14 @@ int main(int argc, char **argv) {
       // For convenience, convert the input .npy to .xyz
       convertNPYtoXYZ(inputArg.getValue());
    }
-   catch (TCLAP::ArgException &e) { std::cerr << "Error: " << e.error() << " for " << e.argId() << std::endl; }
+   catch (const TCLAP::ArgException &e) {
+      std::cerr << "Error: " << e.error() << " for " << e.argId() << std::endl;
+      return 2;
+   }
+   catch (const std::exception &e) {
+      std::cerr << "Error: " << e.what() << std::endl;
+      return 1;
+   }
 
    return 0;
 }
