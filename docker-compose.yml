@@ -1,15 +1,8 @@
-version: '3'
-
 services:
-
-  masbcpp:
-    image: "shapespace/masbcpp"
+  geometry-filter:
     build:
       context: .
-      dockerfile: Dockerfile
-    ports:
-      - "9988:8888"
+    image: beng-thesis-geometry-filter:local
     volumes:
-      - ./notebooks:/home/analytics/notebooks
-      - .:/tmp/stuff/masbcpp
-      - ./tmp/cnpy:/tmp/stuff/cnpy
+      - ./data:/data
+    command: ["compute_ma", "--help"]

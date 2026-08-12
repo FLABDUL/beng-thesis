@@ -1,2 +1,0 @@
-/usr/bin/ar qc libthirdparty.a  CMakeFiles/thirdparty.dir/thirdparty/cnpy/cnpy.cpp.o
-/usr/bin/ranlib libthirdparty.a

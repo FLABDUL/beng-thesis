@@ -20,8 +20,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include <iostream>
+#include <algorithm>
+#include <cmath>
+#include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <string>
 
 #include <tclap/CmdLine.h>
@@ -29,85 +32,90 @@ SOFTWARE.
 #include "compute_ma_processing.h"
 #include "io.h"
 #include "madata.h"
-#include "types.h"
+#include "version.h"
 
-int main(int argc, char **argv) {//?
-   // parse command line arguments
-   
-   try {//all the outputs here can be seen in the Jupyter Notebook
-	   
-      //std::cout << "DEBUG: Starting compute_ma.cpp. " << std::endl;//indicate executable starting
-	   
-      TCLAP::CmdLine cmd("Computes a MAT point approximation, see also https://github.com/tudelft3d/masbcpp", ' ', "0.1");//command line info
+int main(int argc, char **argv) {
+   try {
+      TCLAP::CmdLine cmd(
+         "Approximate interior and exterior medial-axis balls using the shrinking-ball algorithm.",
+         ' ', MASBCPP_VERSION);
 
-      TCLAP::UnlabeledValueArg<std::string> inputArg("input", "path to directory with inside it a 'coords.npy' and a 'normals.npy' file. Both should be Nx3 float arrays where N is the number of input points.", true, "", "input dir", cmd);//input help/error info
-      TCLAP::UnlabeledValueArg<std::string> outputArg("output", "path to output directory", false, "", "output dir", cmd);//output help/error info
+      TCLAP::UnlabeledValueArg<std::string> input_arg(
+         "input", "Directory containing Nx3 coords.npy and normals.npy arrays.",
+         true, "", "input directory", cmd);
+      TCLAP::UnlabeledValueArg<std::string> output_arg(
+         "output", "Output directory; defaults to the input directory.",
+         false, "", "output directory", cmd);
+      TCLAP::ValueArg<double> preserve_arg(
+         "d", "preserve", "Stable-ball denoising angle in degrees.", false, 20, "degrees", cmd);
+      TCLAP::ValueArg<double> planar_arg(
+         "p", "planar", "Planar denoising angle in degrees.", false, 32, "degrees", cmd);
+      TCLAP::ValueArg<double> radius_arg(
+         "r", "radius", "Initial ball radius in model units.", false, 200, "number", cmd);
+      TCLAP::ValueArg<double> convergence_arg(
+         "c", "convergence", "Minimum radius change before convergence.", false, 1E-7, "number", cmd);
+      TCLAP::ValueArg<unsigned int> iterations_arg(
+         "i", "iterations", "Maximum shrinking-ball iterations per sample.", false, 200, "integer", cmd);
+      TCLAP::SwitchArg nan_arg(
+         "a", "nan", "Write NaN when a ball remains at its initial radius.", cmd, false);
 
-      TCLAP::ValueArg<double> denoise_preserveArg("d", "preserve", "denoise preserve threshold", false, 20, "double", cmd);//dp var
-      TCLAP::ValueArg<double> denoise_planarArg("p", "planar", "denoise planar threshold", false, 32, "double", cmd);//dpt var
-      TCLAP::ValueArg<double> initial_radiusArg("r", "radius", "initial ball radius", false, 200, "double", cmd);//ibr var
+      cmd.parse(argc, argv);
 
-      TCLAP::SwitchArg nan_for_initrSwitch("a", "nan", "write nan for points with radius equal to initial radius", cmd, false);//a help/error info
-
-      cmd.parse(argc, argv);//?
-
-      ma_parameters input_parameters;//state vars
-
-      input_parameters.initial_radius = float(initial_radiusArg.getValue());//get ir var
-      input_parameters.denoise_preserve = (M_PI / 180.0) * denoise_preserveArg.getValue();//get dps var
-      input_parameters.denoise_planar = (M_PI / 180.0) * denoise_planarArg.getValue();//get dpn var
-      input_parameters.nan_for_initr = nan_for_initrSwitch.getValue();//get nan var
-
-      std::string output_path = outputArg.isSet() ? outputArg.getValue() : inputArg.getValue();//check path i/o
-
-      //std::cout << "Parameters: denoise_preserve=" << denoise_preserveArg.getValue() << ", denoise_planar=" << denoise_planarArg.getValue() << ", initial_radius=" << input_parameters.initial_radius << "\n";//output set vars by cmd line
-
-      //std::cout << "DEBUG: Initial parameters created/set " << std::endl;//indicate pars given/set
-
-      io_parameters io_params = {};//empty i/p par var?
-      io_params.coords = true;//take coords
-      io_params.normals = true;//take normals
-
-      ma_data madata = {};//empty data output?
-      npy2madata(inputArg.getValue(), madata, io_params);//?
-
-      // Perform the actual processing
-      madata.ma_coords.reset(new PointCloud);//create point cloud
-      madata.ma_coords->resize(2 * madata.coords->size());//resize coords
-      madata.ma_qidx.resize(2 * madata.coords->size());//resize index
-	  madata.ma_rs.resize(2 * madata.coords->size());//resize index
-      compute_masb_points(input_parameters, madata);//compute ma using ip and resized data
-
-      io_params.coords = false;//check coords taken?
-      io_params.normals = false;//check normals taken?
-      io_params.ma_coords = true;//check output coords created?
-      io_params.ma_qidx = true;//check output array created?
-      io_params.ma_rs = true;//check output array created?
-
-      io_params.c_p = true;//HAKIM FINDING C-P
-
-      madata2npy(output_path, madata, io_params);//?
-
-      {
-          //std::cout << "DEBUG: Errors are printed after this line. " << std::endl;//potential error warnings
-		 
-         std::string output_path_metadata = output_path + "/compute_ma";//?
-         std::replace(output_path_metadata.begin(), output_path_metadata.end(), '\\', '/');//?
-
-         std::ofstream metadata(output_path_metadata.c_str());//?
-         if (!metadata) {//check for invalid data file path
-            throw TCLAP::ArgParseException("invalid filepath", output_path);//invalid file path warning
-         }
-
-         metadata//data from cmd line input
-            << "initial_radius " << input_parameters.initial_radius << std::endl//ir ip data
-            << "nan_for_initr " << input_parameters.nan_for_initr << std::endl//ir nan ip data
-            << "denoise_preserve " << denoise_preserveArg.getValue() << std::endl//dps input data
-            << "denoise_planar " << denoise_planarArg.getValue() << std::endl;//dpn input data
-         metadata.close();
+      if (radius_arg.getValue() <= 0 || convergence_arg.getValue() <= 0 || iterations_arg.getValue() == 0) {
+         throw TCLAP::ArgParseException(
+            "radius, convergence and iterations must be greater than zero", "parameters");
       }
-   }
-   catch (TCLAP::ArgException &e) { std::cerr << "Error: " << e.error() << " for " << e.argId() << std::endl; }//check for error and state what it is
 
-   return 0;//compulsory return value
+      constexpr double pi = 3.14159265358979323846;
+      ma_parameters parameters{};
+      parameters.initial_radius = static_cast<Scalar>(radius_arg.getValue());
+      parameters.denoise_preserve = (pi / 180.0) * preserve_arg.getValue();
+      parameters.denoise_planar = (pi / 180.0) * planar_arg.getValue();
+      parameters.nan_for_initr = nan_arg.getValue();
+      parameters.convergence_delta = static_cast<Scalar>(convergence_arg.getValue());
+      parameters.iteration_limit = iterations_arg.getValue();
+
+      const std::string output_path = output_arg.isSet() ? output_arg.getValue() : input_arg.getValue();
+      std::filesystem::create_directories(output_path);
+
+      io_parameters io_params{};
+      io_params.coords = true;
+      io_params.normals = true;
+
+      ma_data madata{};
+      npy2madata(input_arg.getValue(), madata, io_params);
+      madata.ma_coords.reset(new PointCloud);
+      madata.ma_coords->resize(2 * madata.coords->size());
+      madata.ma_qidx.resize(2 * madata.coords->size());
+      madata.ma_rs.resize(2 * madata.coords->size());
+      compute_masb_points(parameters, madata);
+
+      io_params = {};
+      io_params.ma_coords = true;
+      io_params.ma_qidx = true;
+      io_params.ma_rs = true;
+      madata2npy(output_path, madata, io_params);
+
+      std::filesystem::path metadata_path = std::filesystem::path(output_path) / "compute_ma.txt";
+      std::ofstream metadata(metadata_path);
+      if (!metadata) {
+         throw std::runtime_error("Could not write metadata to " + metadata_path.string());
+      }
+      metadata
+         << "version " << MASBCPP_VERSION << '\n'
+         << "initial_radius " << parameters.initial_radius << '\n'
+         << "nan_for_initial_radius " << parameters.nan_for_initr << '\n'
+         << "denoise_preserve_degrees " << preserve_arg.getValue() << '\n'
+         << "denoise_planar_degrees " << planar_arg.getValue() << '\n'
+         << "convergence_delta " << parameters.convergence_delta << '\n'
+         << "iteration_limit " << parameters.iteration_limit << '\n';
+   } catch (const TCLAP::ArgException &error) {
+      std::cerr << "Error: " << error.error() << " for " << error.argId() << '\n';
+      return 2;
+   } catch (const std::exception &error) {
+      std::cerr << "Error: " << error.what() << '\n';
+      return 1;
+   }
+
+   return 0;
 }

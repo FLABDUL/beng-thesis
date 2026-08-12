@@ -1,0 +1,14 @@
+.git
+.github
+build
+CMakeCache.txt
+CMakeFiles
+demo/node_modules
+demo/.next
+demo/dist
+demo/.wrangler
+data
+*.ipynb_checkpoints*
+*.o
+*.a
+*.exe

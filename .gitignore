@@ -1,0 +1,44 @@
+# CMake and native build output
+/build/
+/cmake-build-*/
+/CMakeCache.txt
+/CMakeFiles/
+/Makefile
+/cmake_install.cmake
+/CTestTestfile.cmake
+/Testing/
+*.a
+*.lib
+*.o
+*.obj
+*.exe
+/compute_ma
+/compute_normals
+/simplify
+
+# Editors and notebooks
+.vs/
+.vscode/
+.idea/
+.ipynb_checkpoints/
+*.suo
+*.VC.db
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Web demo
+/demo/node_modules/
+/demo/.next/
+/demo/.vinext/
+/demo/dist/
+/demo/.wrangler/
+/demo/outputs/
+/demo/work/
+
+# Local data and operating-system files
+/data/
+.DS_Store
+Thumbs.db
