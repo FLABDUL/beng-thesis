@@ -38,6 +38,7 @@ target_link_directories(masbcpp PUBLIC ${PCL_LIBRARY_DIRS})
 target_link_libraries(masbcpp
   PUBLIC
     cnpy
+    FLANN::FLANN
     ${PCL_COMMON_LIBRARIES}
     ${PCL_SEARCH_LIBRARIES}
     ${PCL_FEATURES_LIBRARIES}
