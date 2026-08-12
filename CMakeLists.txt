@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(beng_thesis_geometry_filter VERSION 1.1.0 LANGUAGES CXX)
+project(beng_thesis_geometry_filter VERSION 1.1.0 LANGUAGES C CXX)
 
 option(BENG_THESIS_ENABLE_OPENMP "Enable parallel medial-axis processing" ON)
 option(BENG_THESIS_VERBOSE "Print processing timings" OFF)
