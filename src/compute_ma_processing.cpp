@@ -129,7 +129,8 @@ ma_result shrinking_ball_point(
 
    // Derive the reported radius from the final centre so both outputs always
    // describe the same medial ball.
-   const Scalar final_radius = (p - center.getVector3fMap()).norm();
+   const Vector3 final_center = center.getVector3fMap().transpose();
+   const Scalar final_radius = (p - final_center).norm();
    return {center, q_index, final_radius};
 }
 
@@ -145,10 +146,13 @@ void shrinking_ball_points(
 #pragma omp parallel for
 #endif
    for (std::int64_t i = 0; i < static_cast<std::int64_t>(count); ++i) {
-      const Vector3 p = (*madata.coords)[static_cast<size_t>(i)].getVector3fMap();
-      const Vector3 n = inner
-         ? (*madata.normals)[static_cast<size_t>(i)].getNormalVector3fMap()
-         : -(*madata.normals)[static_cast<size_t>(i)].getNormalVector3fMap();
+      const Vector3 p =
+         (*madata.coords)[static_cast<size_t>(i)].getVector3fMap().transpose();
+      Vector3 n =
+         (*madata.normals)[static_cast<size_t>(i)].getNormalVector3fMap().transpose();
+      if (!inner) {
+         n = -n;
+      }
 
       const ma_result result = shrinking_ball_point(parameters, p, n, madata.kd_tree);
       const size_t output_index = static_cast<size_t>(i) + offset;
